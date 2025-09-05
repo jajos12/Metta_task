@@ -2,7 +2,7 @@ import google.generativeai as genai
 import json
 import re
 import logging
-from typing import Any, Dict
+from typing import Any, Dict, List, Tuple, Set
 
 logger = logging.getLogger("route_app.utils")
 logger.setLevel(logging.INFO)
@@ -34,36 +34,63 @@ def _get_model(gemini_api_key: str):
     genai.configure(api_key=gemini_api_key)
     return genai.GenerativeModel(MODEL_NAME)
 
-def user_query_to_metta_call(user_query: str, gemini_api_key: str) -> str:
+STOP_VERBS = {"find", "show", "give", "get", "compute", "fetch", "tell", "list"}
+
+CALL_REGEX = re.compile(r'!?\(shortestPathFinder\s+([A-Za-z_]+)\s+([A-Za-z_]+)\s+(\d)(?:\s+2)?\)')
+
+def _sanitize_llm_call(raw: str) -> str:
+    if not raw:
+        return ''
+    txt = raw.strip()
+    # remove code fences
+    txt = re.sub(r'^```[a-zA-Z]*', '', txt)
+    txt = txt.replace('```', '').strip()
+    # keep only first line containing shortestPathFinder
+    for line in txt.splitlines():
+        if 'shortestPathFinder' in line:
+            txt = line.strip()
+            break
+    # ensure leading '!'
+    if txt.startswith('('):
+        txt = '!'+txt
+    # strip any leading junk before '!'
+    m = re.search(r'!\(shortestPathFinder.*', txt)
+    if m:
+        txt = m.group(0)
+    return txt
+
+def user_query_to_metta_call(user_query: str, gemini_api_key: str) -> Tuple[str, str]:
     """Convert natural language user query into a Metta function call.
     Falls back to a heuristic if LLM response is empty."""
     prompt = f"""Return ONLY a single valid Metta call. No commentary.
-    Supported form:
-        !(shortestPathFinder <CityFrom> <CityTo> <MetricId>)
-    MetricId legend: 0=duration 1=cost 2=distance 3=overall
+Supported form: !(shortestPathFinder <CityFrom> <CityTo> <MetricId> [2])
+MetricId: 0=duration 1=cost 2=distance 3=overall. If MetricId=3 add a trailing 2 argument.
+Rules:
+ - Multi-word city names MUST use underscores.
+ - No commentary, backticks, quotes, or explanation.
+ - Always start with '!('
 
-    RULE: Multi-word city names MUST use underscores instead of spaces.
-                Example: "Addis Ababa" -> Addis_Ababa, "New York" -> New_York.
-    OUTPUT must never contain spaces inside city identifiers.
+Examples:
+Fastest Jimma to Addis => !(shortestPathFinder Jimma Addis 0)
+Cheapest Bahirdar to Mekele => !(shortestPathFinder Bahirdar Mekele 1)
+Shortest distance Hawassa to Arbaminch => !(shortestPathFinder Hawassa Arbaminch 2)
+Best overall Addis Ababa to Gonder => !(shortestPathFinder Addis_Ababa Gonder 3 2)
 
-    Examples:
-    Fastest Jimma to Addis => !(shortestPathFinder Jimma Addis 0)
-    Cheapest Bahirdar to Mekele => !(shortestPathFinder Bahirdar Mekele 1)
-    Shortest distance Hawassa to ArbaMinch => !(shortestPathFinder Hawassa ArbaMinch 2)
-    Best overall Addis Ababa to Gonder => !(shortestPathFinder Addis_Ababa Gonder 3)
-
-    User query: {user_query}
-    Metta:
-    """
+User query: {user_query}
+Metta:
+"""
     try:
         model = _get_model(gemini_api_key)
         response = model.generate_content(prompt)
-        txt = (response.text or '').strip()
-        logger.info("LLM metta-call raw response: %s", txt[:120])
+        raw = (response.text or '').strip()
+        logger.info("LLM metta-call raw response: %s", raw[:120])
+        txt = _sanitize_llm_call(raw)
+        txt2 = txt.replace("shortestPathFinder", "pathFind") if txt else ''
     except Exception as e:  # noqa: BLE001
         logger.error("LLM metta-call generation failed: %s", e)
         txt = ''
-    if not txt.startswith('!(shortestPathFinder'):
+        txt2 = ''
+    if not CALL_REGEX.match(txt):
         # heuristic fallback
         metric_map = {
             'fastest': 0, 'duration': 0,
@@ -83,7 +110,7 @@ def user_query_to_metta_call(user_query: str, gemini_api_key: str) -> str:
         current = []
         for tok in raw_tokens:
             cleaned = re.sub(r'[^A-Za-z]', '', tok)
-            if cleaned and cleaned[0].isupper():
+            if cleaned and cleaned[0].isupper() and cleaned.lower() not in STOP_VERBS:
                 current.append(cleaned)
             else:
                 if current:
@@ -93,10 +120,16 @@ def user_query_to_metta_call(user_query: str, gemini_api_key: str) -> str:
             groups.append('_'.join(current))
         if len(groups) >= 2:
             city_a, city_b = groups[0], groups[1]
-            txt = f"!(shortestPathFinder {city_a} {city_b} {metric_id})"
-            txt2 = f"!(pathFinder )"
+            if metric_id == 3:
+                txt = f"!(shortestPathFinder {city_a} {city_b} {metric_id} 2)"
+                txt2 = f"!(pathFind {city_a} {city_b} {metric_id} 2)"
+            else:
+                txt = f"!(shortestPathFinder {city_a} {city_b} {metric_id})"
+                txt2 = f"!(pathFind {city_a} {city_b} {metric_id})"
+    logger.debug("Sanitized primary metta call: %s", txt)
+    logger.debug("Secondary (all paths) call: %s", txt2)
     logger.debug("Final metta call resolved: %s", txt)
-    return txt
+    return (txt, txt2)
 
 # Utility: Convert metta result to human readable using Gemini
 def metta_result_to_human(metta_result: str, user_query: str, gemini_api_key: str) -> str:
@@ -121,34 +154,45 @@ Explanation:
         return "Unable to generate explanation right now."
 
 # Utility: Convert metta result to graph JSON using Gemini
+EDGE_PATTERN = re.compile(r'\((\w+)\s+--\s+(\d+)\s+--?>\s+(\w+)\)')
+
+def _parse_metta_paths(raw: Any) -> Tuple[List[Dict[str, str]], List[Dict[str, str]]]:
+    if not raw:
+        return [], []
+    text = str(raw)
+    nodes: Set[str] = set()
+    edges: List[Dict[str, str]] = []
+    for m in EDGE_PATTERN.finditer(text):
+        src, weight, dst = m.groups()
+        nodes.add(src)
+        nodes.add(dst)
+        edges.append({"from": src, "to": dst, "label": weight})
+    node_objs = [{"id": n} for n in sorted(nodes)]
+    return node_objs, edges
+
 def metta_result_to_graph_json(metta_result: str, gemini_api_key: str) -> dict:
-    """Produce graph JSON from a Metta path result. LLM-assisted, with fallback."""
-    prompt = f"""Return ONLY JSON with keys: nodes (list of strings), edges (list of objects {{from,to,label}}).
-Infer labels like "Duration: X" / "Cost: Y" etc if present; otherwise just use "route".
-Result: {metta_result}
-JSON:
-"""
-    raw = ''
+    """Deterministically parse Metta path result into graph JSON; fallback to LLM if no edges found."""
+    nodes, edges = _parse_metta_paths(metta_result)
+    if edges:
+        logger.info("Deterministic graph parse: nodes=%d edges=%d", len(nodes), len(edges))
+        return {"nodes": nodes, "edges": edges}
+    # fallback to LLM minimal (kept but rarely used now)
+    prompt = f"Return JSON with nodes (array of strings) and edges (array of objects with from,to,label) for: {metta_result}"[:4000]
     try:
         model = _get_model(gemini_api_key)
-        response = model.generate_content(prompt)
-        raw = (response.text or '').strip()
-        logger.info("LLM graph response raw: %s", raw[:160])
-    except Exception as e:  # noqa: BLE001
-        logger.error("Graph JSON generation failed: %s", e)
-        raw = ''
-    # Extract first JSON object
-    match = re.search(r'\{.*\}', raw, re.DOTALL)
-    if match:
-        candidate = match.group(0)
-        try:
-            data = json.loads(candidate)
-            logger.info("Parsed graph JSON: nodes=%s edges=%s", len(data.get('nodes', [])), len(data.get('edges', [])))
+        resp = model.generate_content(prompt)
+        raw = (resp.text or '').strip()
+        match = re.search(r'\{.*\}', raw, re.DOTALL)
+        if match:
+            data = json.loads(match.group(0))
+            n = data.get('nodes', [])
+            # normalize node structure
+            if n and isinstance(n[0], str):
+                data['nodes'] = [{"id": s} for s in n]
+            logger.info("LLM fallback graph nodes=%s edges=%s", len(data.get('nodes', [])), len(data.get('edges', [])))
             return data
-        except json.JSONDecodeError as je:
-            logger.warning("Failed to parse JSON candidate: %s", je)
-    # Fallback minimal structure
-    logger.info("Returning empty graph structure (fallback)")
+    except Exception as e:  # noqa: BLE001
+        logger.error("Graph fallback generation failed: %s", e)
     return {"nodes": [], "edges": []}
 
 

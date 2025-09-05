@@ -48,12 +48,16 @@ async def get_route(request: Request):
     if re.match(r"^(hi|hello|hey|howdy|yo|sup|good (morning|evening|afternoon))\b", user_query, re.I):
         return {"answer": "👋 Hi! Ask me for routes like 'Fastest Jimma to Addis_Ababa' or add a fact with (flight-route CityA CityB (Duration d Cost c Distance x))"}
 
-    metta_call = user_query_to_metta_call(user_query, GEMINI_API_KEY)
-    logger.info("Resolved metta call: %s", metta_call)
+    metta_call, for_graph = user_query_to_metta_call(user_query, GEMINI_API_KEY)
+    logger.info("Resolved metta call(all paths): %s", for_graph)
+    logger.info("Resolved metta call(shortest path): %s", metta_call)
 
     # 2. Run metta call
     try:
-        result = metta.run(metta_call)
+        result = metta.run(metta_call); 
+        result2 = metta.run(for_graph); 
+        logger.info("The result returned from metta is(all paths): %s", result2)
+        logger.info("The result returned from metta is(shortest path): %s", result)
     except Exception as e:  # noqa: BLE001
         logger.exception("Metta execution failed")
         return JSONResponse({
@@ -64,7 +68,7 @@ async def get_route(request: Request):
     human_answer = metta_result_to_human(result, user_query, GEMINI_API_KEY)
 
     # 4. Convert metta result to graph JSON
-    graph_json = metta_result_to_graph_json(result, GEMINI_API_KEY)
+    graph_json = metta_result_to_graph_json(result2, GEMINI_API_KEY)
 
     return JSONResponse({
         "metta_call": f"{metta_call}",

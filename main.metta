@@ -44,7 +44,6 @@
     )
 )
 
-!(dataPreProcessor)
 (= (isMemberHelper $list $ele) 
     (collapse (let $child (superpose $list) (if (== $child $ele) True (empty))))
 )
@@ -53,17 +52,17 @@
     (if (== (isMemberHelper $list $ele) (True)) True False)
 )
 
-(: pathFind (-> Atom Atom Expression Number Expression))
-(= (pathFind $first $last $visited $type)
+; (: pathFind (-> Atom Atom Expression Number SpaceAtom Expression))
+(= (pathFind $first $last $visited $type $space)
     (if (isMember $visited $first) 
         (empty)
         (if (== $first $last) 
             ($first)
             (let $newVisited (cons-atom $first $visited)
-                (match &db 
+                (match $space 
                     (flight-route $first $sec $remaining)
                     (let ($ans $x) 
-                        ((pathFind $sec $last $newVisited $type) (index-atom $remaining (+ (* $type 2) 1)))
+                        ((pathFind $sec $last $newVisited $type $space) (index-atom $remaining (+ (* $type 2) 1)))
                         (union-atom ($first -- $x -->) $ans)
                     )
                 )
@@ -72,9 +71,17 @@
     )
 )
 
-(: pathFind (-> Atom Atom Number Expression))
+; (: pathFind (-> Atom Atom Number SpaceAtom Expression))
+(= (pathFind $first $second $type $space)
+    (if (== $space 1)
+        (collapse (pathFind $first $second () $type &db))
+        (let ($_ $answer) ((dataPreProcessor) (collapse (pathFind $first $second () $type &db2))) $answer)
+    )
+)
+
+; (: pathFind (-> Atom Atom Number Expression))
 (= (pathFind $first $second $type)
-    (collapse (pathFind $first $second () $type))
+    (collapse (pathFind $first $second () $type &db))
 )
 
 
@@ -100,8 +107,8 @@
     )
 )
 
-(= (shortestPathFinder $first $second $type)
-    (let $allpaths (pathFind $first $second $type)
+(= (shortestPathFinder $first $second $type $space)
+    (let $allpaths (pathFind $first $second $type $space)
         (if (== $allpaths ())
             (There is no path between $first and $second)
             (let $shPath (index-atom $allpaths 0) (shortestPathFinderHelper $allpaths $shPath (py-atom "float('inf')") 0))
@@ -109,4 +116,13 @@
     )
 )
 
-; !(shortestPathFinder Jimma Addis 0)
+(= (shortestPathFinder $first $second $type)
+    (let $allpaths (pathFind $first $second $type 1)
+        (if (== $allpaths ())
+            (There is no path between $first and $second)
+            (let $shPath (index-atom $allpaths 0) (shortestPathFinderHelper $allpaths $shPath (py-atom "float('inf')") 0))
+        )
+    )
+)
+
+!(shortestPathFinder Hawassa Arbaminch 2)
