@@ -774,19 +774,19 @@
         const chat = document.getElementById('chat');
         const chatForm = document.getElementById('chatForm');
         const userInput = document.getElementById('userInput');
-    const graphDiv = document.getElementById('graph');
-    const graphPanel = document.getElementById('graphPanel'); // legacy (unused)
-    const mettaCallBox = document.getElementById('mettaCall');
-    const mettaCallCode = document.getElementById('mettaCallCode');
-    const copyCallBtn = document.getElementById('copyCall');
+        const graphDiv = document.getElementById('graph');
+        const graphPanel = document.getElementById('graphPanel'); // legacy (unused)
+        const mettaCallBox = document.getElementById('mettaCall');
+        const mettaCallCode = document.getElementById('mettaCallCode');
+        const copyCallBtn = document.getElementById('copyCall');
         const chips = document.getElementById('chips');
-    const vizModal = document.getElementById('vizModal');
-    const closeViz = document.getElementById('closeViz');
+        const vizModal = document.getElementById('vizModal');
+        const closeViz = document.getElementById('closeViz');
 
-    function openViz() { vizModal.style.display='flex'; }
-    function closeVizModal() { vizModal.style.display='none'; }
-    closeViz.addEventListener('click', closeVizModal);
-    vizModal.addEventListener('click', e => { if (e.target === vizModal) closeVizModal(); });
+        function openViz() { vizModal.style.display='flex'; }
+        function closeVizModal() { vizModal.style.display='none'; }
+        closeViz.addEventListener('click', closeVizModal);
+        vizModal.addEventListener('click', e => { if (e.target === vizModal) closeVizModal(); });
 
         function addMsg(text, sender) {
             const msgDiv = document.createElement('div');
@@ -915,54 +915,189 @@
             });
         }
 
+        // --- Graph rendering with weighted layout & drag ---
+        let currentLayout = {}; // nodeId -> {x,y}
+        let dragState = null; // {id, offsetX, offsetY}
+        function parseWeight(label) {
+            if (!label) return 100;
+            const m = label.match(/(\d+(?:\.\d+)?)/);
+            if (!m) return 100;
+            const v = parseFloat(m[1]);
+            if (isNaN(v)) return 100;
+            return v;
+        }
+        function weightSpacing(w) {
+            // sqrt scaling keeps large distances reasonable
+            return 80 + Math.sqrt(Math.max(1, w)) * 6;
+        }
+        function initialLayout(nodes, edges) {
+            const ordered = nodes.map(n => n.id);
+            let x = 80;
+            const baseY = 140;
+            const amp = 60;
+            ordered.forEach((id, i) => {
+                if (i > 0) {
+                    // find an edge between previous and current to influence spacing
+                    const prev = ordered[i-1];
+                    const e = edges.find(ed => (ed.from === prev && ed.to === id) || (ed.from === id && ed.to === prev));
+                    const w = e ? parseWeight(e.label) : 100;
+                    x += weightSpacing(w);
+                }
+                const y = baseY + Math.sin(i * 0.9) * amp; // wave pattern
+                currentLayout[id] = { x, y };
+            });
+        }
+        function attachDrag(svgEl) {
+            svgEl.addEventListener('pointerdown', e => {
+                const target = e.target.closest('g.node');
+                if (!target) return;
+                const id = target.getAttribute('data-id');
+                if (!id) return;
+                const { x, y } = currentLayout[id];
+                dragState = { id, offsetX: e.clientX - x, offsetY: e.clientY - y };
+                target.classList.add('dragging');
+                svgEl.setPointerCapture(e.pointerId);
+            });
+            svgEl.addEventListener('pointermove', e => {
+                if (!dragState) return;
+                const { id, offsetX, offsetY } = dragState;
+                const nx = e.clientX - offsetX;
+                const ny = e.clientY - offsetY;
+                currentLayout[id] = { x: nx, y: ny };
+                updateNodePosition(id);
+                updateEdges();
+            });
+            svgEl.addEventListener('pointerup', e => {
+                if (dragState) {
+                    const nodeEl = svgEl.querySelector(`g.node[data-id="${dragState.id}"]`);
+                    if (nodeEl) nodeEl.classList.remove('dragging');
+                }
+                dragState = null;
+            });
+            svgEl.addEventListener('pointerleave', e => {
+                dragState = null;
+            });
+        }
+        function updateNodePosition(id) {
+            const nodeEl = graphDiv.querySelector(`svg g.node[data-id="${id}"]`);
+            if (!nodeEl) return;
+            const { x, y } = currentLayout[id];
+            nodeEl.setAttribute('transform', `translate(${x},${y})`);
+        }
+        function updateEdges() {
+            const svg = graphDiv.querySelector('svg');
+            if (!svg) return;
+            const textMuted = getComputedStyle(document.documentElement).getPropertyValue('--text-muted');
+            svg.querySelectorAll('path.edge').forEach(p => {
+                const from = p.getAttribute('data-from');
+                const to = p.getAttribute('data-to');
+                if (!(from in currentLayout) || !(to in currentLayout)) return;
+                const f = currentLayout[from];
+                const t = currentLayout[to];
+                const gap = Math.abs(f.x - t.x) / 120; // pseudo gap
+                let d;
+                if (Math.abs(f.y - t.y) < 10 && gap <= 1.2) {
+                    d = `M${f.x},${f.y} L${t.x},${t.y}`;
+                } else {
+                    const midX = (f.x + t.x) / 2;
+                    const midY = Math.min(f.y, t.y) - 60 - gap * 8;
+                    d = `M${f.x},${f.y} Q${midX},${midY} ${t.x},${t.y}`;
+                }
+                p.setAttribute('d', d);
+            });
+            svg.querySelectorAll('text.edge-label').forEach(lbl => {
+                const from = lbl.getAttribute('data-from');
+                const to = lbl.getAttribute('data-to');
+                if (!(from in currentLayout) || !(to in currentLayout)) return;
+                const f = currentLayout[from];
+                const t = currentLayout[to];
+                const labelX = (f.x + t.x) / 2;
+                const labelY = (f.y + t.y) / 2 - 25;
+                lbl.setAttribute('x', labelX);
+                lbl.setAttribute('y', labelY);
+            });
+        }
         function renderGraph(graph) {
-            const width = Math.max(120 * graph.nodes.length + 200, 600);
-            let html = `<svg width="${width}" height="180" font-family='Inter, sans-serif' style="filter: drop-shadow(0 4px 20px rgba(255, 107, 53, 0.3));">`;
-            
-            // Gradient definitions
+            if (!graph || !Array.isArray(graph.nodes) || !Array.isArray(graph.edges)) {
+                graphDiv.innerHTML = '<p style="color:var(--text-muted);">No graph data.</p>';
+                return;
+            }
+            // Normalize node list if backend returned primitives or objects
+            const normalizedNodes = graph.nodes.map(n => {
+                if (n == null) return { id: '?' };
+                if (typeof n === 'string') return { id: n };
+                if (typeof n === 'object' && 'id' in n) return { id: String(n.id) };
+                return { id: String(n) };
+            });
+            // Deduplicate preserving order
+            const seen = new Set();
+            const nodes = [];
+            for (const n of normalizedNodes) {
+                if (!seen.has(n.id)) { seen.add(n.id); nodes.push(n); }
+            }
+            // Normalize edges
+            const edges = (graph.edges || []).map(e => {
+                if (!e) return null;
+                const from = e.from || (e.source || e[0]);
+                const to = e.to || (e.target || e[1]);
+                const label = e.label || e.weight || e.value || 'route';
+                if (!from || !to) return null;
+                return { from: String(from), to: String(to), label: String(label) };
+            }).filter(Boolean);
+            // Add any missing nodes referenced only in edges
+            edges.forEach(ed => {
+                if (!seen.has(ed.from)) { seen.add(ed.from); nodes.push({id: ed.from}); }
+                if (!seen.has(ed.to)) { seen.add(ed.to); nodes.push({id: ed.to}); }
+            });
+            if (!nodes.length) {
+                graphDiv.innerHTML = '<p style="color:var(--text-muted);">No nodes to display.</p>';
+                return;
+            }
+            initialLayout(nodes, edges);
+            const width = Math.max(Object.values(currentLayout).reduce((mx, p) => Math.max(mx, p.x), 0) + 160, 800);
+            const height = 320;
+            let html = `<svg width="${width}" height="${height}" font-family='Inter, sans-serif' style="filter: drop-shadow(0 4px 20px rgba(255, 107, 53, 0.3)); touch-action: none;">`;
             html += `<defs>
-                <linearGradient id="nodeGrad" x1="0%"
-                y1="0%" x2="100%" y2="100%">
+                <linearGradient id="nodeGrad" x1="0%" y1="0%" x2="100%" y2="100%">
                     <stop offset="0%" style="stop-color:${getComputedStyle(document.documentElement).getPropertyValue('--primary')};stop-opacity:1" />
                     <stop offset="100%" style="stop-color:${getComputedStyle(document.documentElement).getPropertyValue('--accent')};stop-opacity:1" />
                 </linearGradient>
-            </defs>`;
-            // Nodes
-            graph.nodes.forEach((node, i) => {
-                const x = 100 + i * 120;
-                const y = 90;
-                html += `<g class="node" transform="translate(${x},${y})">
-                    <circle r="30" fill="url(#nodeGrad)" stroke="white" stroke-width="2" />
-                    <text text-anchor="middle" dy="0.35em" fill="white" font-size="0.9rem" font-weight="600">${node.id}</text>
-                </g>`;
-            });
-            // Edges
-            graph.edges.forEach(edge => {
-                const fromIndex = graph.nodes.findIndex(n => n.id === edge.from);
-                const toIndex = graph.nodes.findIndex(n => n.id === edge.to);
-                if (fromIndex === -1 || toIndex === -1) return;
-                const x1 = 100 + fromIndex * 120;
-                const y1 = 90;
-                const x2 = 100 + toIndex * 120;
-                const y2 = 90;
-                const midX = (x1 + x2) / 2;
-                const midY = y1 - 40; // Curve upwards
-                html += `<path d="M${x1},${y1} Q${midX},${midY} ${x2},${y2}" stroke="${getComputedStyle(document.documentElement).getPropertyValue('--text-muted')}" stroke-width="2" fill="none" marker-end="url(#arrow)"/>`;
-                
-                // Edge label
-                const labelX = (x1 + x2) / 2;
-                const labelY = (y1 + y2) / 2 - 20;
-                html += `<text x="${labelX}" y="${labelY}" text-anchor="middle" fill="${getComputedStyle(document.documentElement).getPropertyValue('--text-muted')}" font-size="0.75rem" font-weight="500">${edge.label}</text>`;
-            });
-            // Arrowhead definition
-            html += `<defs>
                 <marker id="arrow" markerWidth="10" markerHeight="10" refX="6" refY="3" orient="auto" markerUnits="strokeWidth">
                     <path d="M0,0 L0,6 L9,3 z" fill="${getComputedStyle(document.documentElement).getPropertyValue('--text-muted')}" />
                 </marker>
             </defs>`;
+            // Edges first (so they render below nodes) using temporary placeholders; updated later
+            edges.forEach(edge => {
+                const f = currentLayout[edge.from];
+                const t = currentLayout[edge.to];
+                if (!f || !t) return;
+                const midX = (f.x + t.x) / 2;
+                const midY = Math.min(f.y, t.y) - 60;
+                const d = `M${f.x},${f.y} Q${midX},${midY} ${t.x},${t.y}`;
+                html += `<path class="edge" data-from="${edge.from}" data-to="${edge.to}" d="${d}" stroke="${getComputedStyle(document.documentElement).getPropertyValue('--text-muted')}" stroke-width="2" fill="none" marker-end="url(#arrow)"/>`;
+                html += `<text class="edge-label" data-from="${edge.from}" data-to="${edge.to}" text-anchor="middle" fill="${getComputedStyle(document.documentElement).getPropertyValue('--text-muted')}" font-size="0.65rem" font-weight="500"></text>`;
+            });
+            // Nodes
+            nodes.forEach(node => {
+                const { x, y } = currentLayout[node.id];
+                html += `<g class="node" data-id="${node.id}" transform="translate(${x},${y})" style="cursor:grab;">
+                    <circle r="36" fill="url(#nodeGrad)" stroke="white" stroke-width="2" />
+                    <text text-anchor="middle" dy="0.35em" fill="white" font-size="0.9rem" font-weight="600">${node.id}</text>
+                </g>`;
+            });
             html += `</svg>`;
             graphDiv.innerHTML = html;
             graphDiv.scrollLeft = graphDiv.scrollWidth;
+            // Fill edge labels after nodes added
+            const svgEl = graphDiv.querySelector('svg');
+            svgEl.querySelectorAll('text.edge-label').forEach(lbl => {
+                const from = lbl.getAttribute('data-from');
+                const to = lbl.getAttribute('data-to');
+                const ed = edges.find(e => e.from === from && e.to === to || e.from === to && e.to === from);
+                if (ed) lbl.textContent = ed.label;
+            });
+            updateEdges();
+            attachDrag(svgEl);
         }
     </script>
 </body></html>

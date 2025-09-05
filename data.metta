@@ -21,3 +21,5 @@
 (flight-route Hawassa Arbaminch (Duration 2 Cost 1200 Distance 150))
 (flight-route Arbaminch Jimma (Duration 3 Cost 2000 Distance 250))
 (flight-route Jimma Arbaminch (Duration 3 Cost 2000 Distance 250))
+(flight-route TestCity DemoCity (Duration 3 Cost 2100 Distance 260))
+(flight-route TestCity DemoCity (Duration 3 Cost 2100 Distance 260))

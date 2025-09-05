@@ -20,12 +20,6 @@ def add_route_fact(fact: str, data_file: str = 'data.metta', main_file: str = 'm
     with open(data_file, 'a', encoding='utf-8') as f:
         f.write('\n' + fact)
     logger.info("Appended new fact to %s: %s", data_file, fact)
-    # Optionally, reload Metta knowledge base by re-running main.metta
-    from hyperon import metta
-    with open(main_file, 'r', encoding='utf-8') as f:
-        main_code = f.read()
-    metta.run(main_code)
-    logger.info("Reloaded Metta knowledge base after fact addition")
     return 'Fact added successfully.'
 # Utility: Convert user query to metta call using Gemini
 def _get_model(gemini_api_key: str):
@@ -128,11 +122,34 @@ Explanation:
 # Utility: Convert metta result to graph JSON using Gemini
 def metta_result_to_graph_json(metta_result: str, gemini_api_key: str) -> dict:
     """Produce graph JSON from a Metta path result. LLM-assisted, with fallback."""
-    prompt = f"""Return ONLY JSON with keys: nodes (list of strings), edges (list of objects {{from,to,label}}).
-Infer labels like "Duration: X" / "Cost: Y" etc if present; otherwise just use "route".
-Result: {metta_result}
-JSON:
-"""
+    # 1. Deterministic parsing attempt from raw Metta output
+    try:
+        text = metta_result if isinstance(metta_result, str) else str(metta_result)
+        # Matches patterns like (CityA -- 150 --> CityB) possibly within nested brackets
+        edge_pattern = re.compile(r'\(([A-Za-z_]+)\s+--\s+(\d+(?:\.\d+)?)\s+-->\s+([A-Za-z_]+)\)')
+        edges_found = edge_pattern.findall(text)
+        if edges_found:
+            nodes = []
+            seen = set()
+            edges_json = []
+            for a, w, b in edges_found:
+                if a not in seen:
+                    nodes.append(a); seen.add(a)
+                if b not in seen:
+                    nodes.append(b); seen.add(b)
+                label = f"Weight: {w}"  # Neutral label; frontend uses numeric spacing.
+                edges_json.append({"from": a, "to": b, "label": label})
+            logger.info("Deterministic graph parse success nodes=%d edges=%d", len(nodes), len(edges_json))
+            return {"nodes": nodes, "edges": edges_json}
+    except Exception as e:  # noqa: BLE001
+        logger.warning("Deterministic parse failed: %s", e)
+
+    # 2. LLM-based extraction (fallback only if deterministic failed)
+    prompt = f"""Return ONLY valid minified JSON with keys exactly: nodes (array of strings) and edges (array of objects with keys from,to,label). No backticks, no prose.
+If no edges can be inferred return {{"nodes":[],"edges":[]}}.
+Use numeric portions you see as part of labels like 'Weight: N'. Input:
+{metta_result}
+JSON:"""
     raw = ''
     try:
         model = _get_model(gemini_api_key)
@@ -142,18 +159,43 @@ JSON:
     except Exception as e:  # noqa: BLE001
         logger.error("Graph JSON generation failed: %s", e)
         raw = ''
-    # Extract first JSON object
-    match = re.search(r'\{.*\}', raw, re.DOTALL)
-    if match:
-        candidate = match.group(0)
+
+    # Clean markdown fences if present
+    if raw.startswith('```'):
+        raw = re.sub(r'^```[a-zA-Z0-9]*', '', raw)
+        raw = raw.strip('`').strip()
+
+    # Attempt to isolate JSON object
+    json_candidate = None
+    brace_indices = [i for i,ch in enumerate(raw) if ch in '{}']
+    if brace_indices:
+        # naive balance scanning
+        depth = 0
+        start = None
+        for i,ch in enumerate(raw):
+            if ch == '{':
+                if depth == 0:
+                    start = i
+                depth += 1
+            elif ch == '}':
+                depth -= 1
+                if depth == 0 and start is not None:
+                    segment = raw[start:i+1]
+                    json_candidate = segment
+                    break
+    if not json_candidate and raw.strip().startswith('{'):
+        json_candidate = raw.strip()
+
+    if json_candidate:
         try:
-            data = json.loads(candidate)
-            logger.info("Parsed graph JSON: nodes=%s edges=%s", len(data.get('nodes', [])), len(data.get('edges', [])))
-            return data
+            data = json.loads(json_candidate)
+            if isinstance(data, dict) and 'nodes' in data and 'edges' in data:
+                logger.info("Parsed graph JSON via LLM: nodes=%s edges=%s", len(data.get('nodes', [])), len(data.get('edges', [])))
+                return data
         except json.JSONDecodeError as je:
-            logger.warning("Failed to parse JSON candidate: %s", je)
-    # Fallback minimal structure
-    logger.info("Returning empty graph structure (fallback)")
+            logger.warning("LLM JSON decode failed: %s", je)
+
+    logger.info("Returning empty graph structure (final fallback)")
     return {"nodes": [], "edges": []}
 
 

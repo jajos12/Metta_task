@@ -89,6 +89,10 @@ async def add_fact(request: Request):
     if not fact:
         return JSONResponse({"error": "Missing fact"}, status_code=400)
     status = add_route_fact(fact)
+    try:
+        metta.run(fact)
+    except:
+        logger.info("Failed to add fact to metta interpreter")    
     logger.info("Add fact status: %s", status)
     return {"status": status}
 

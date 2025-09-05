@@ -125,4 +125,4 @@
     )
 )
 
-!(shortestPathFinder Hawassa Arbaminch 2)
+!(shortestPathFinder Addis Jimma 1)
