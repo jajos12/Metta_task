@@ -125,22 +125,69 @@ def metta_result_to_graph_json(metta_result: str, gemini_api_key: str) -> dict:
     # 1. Deterministic parsing attempt from raw Metta output
     try:
         text = metta_result if isinstance(metta_result, str) else str(metta_result)
-        # Matches patterns like (CityA -- 150 --> CityB) possibly within nested brackets
-        edge_pattern = re.compile(r'\(([A-Za-z_]+)\s+--\s+(\d+(?:\.\d+)?)\s+-->\s+([A-Za-z_]+)\)')
-        edges_found = edge_pattern.findall(text)
-        if edges_found:
-            nodes = []
-            seen = set()
-            edges_json = []
-            for a, w, b in edges_found:
-                if a not in seen:
-                    nodes.append(a); seen.add(a)
-                if b not in seen:
-                    nodes.append(b); seen.add(b)
-                label = f"Weight: {w}"  # Neutral label; frontend uses numeric spacing.
-                edges_json.append({"from": a, "to": b, "label": label})
-            logger.info("Deterministic graph parse success nodes=%d edges=%d", len(nodes), len(edges_json))
-            return {"nodes": nodes, "edges": edges_json}
+        # Strip outer brackets/list markers
+        # Extract each parenthesized path candidate (no nested parentheses expected in individual paths)
+        path_groups = re.findall(r'\(([^()]+)\)', text)
+        nodes_order = []
+        nodes_seen = set()
+        edge_set = set()  # (from,to,weightStr)
+        edges_json = []
+
+        def add_node(n: str):
+            if n not in nodes_seen:
+                nodes_seen.add(n)
+                nodes_order.append(n)
+
+        for grp in path_groups:
+            # A group may contain a multi-hop chain like: A -- 250 --> B -- 270 --> C -- 180 --> D
+            tokens = grp.strip().split()
+            # We parse sequential pattern: City -- number --> City (-- number --> City)*
+            i = 0
+            if not tokens:
+                continue
+            # Validate starting city token
+            if not re.match(r'^[A-Za-z_]+$', tokens[0]):
+                continue
+            current_city = tokens[0]
+            add_node(current_city)
+            i = 1
+            while i + 3 < len(tokens):
+                if tokens[i] != '--':
+                    break
+                weight_token = tokens[i+1]
+                if not re.match(r'^\d+(?:\.\d+)?$', weight_token):
+                    break
+                if tokens[i+2] != '-->':
+                    break
+                next_city = tokens[i+3]
+                if not re.match(r'^[A-Za-z_]+$', next_city):
+                    break
+                # record edge
+                add_node(next_city)
+                label = f"Weight: {weight_token}"
+                key = (current_city, next_city, weight_token)
+                if key not in edge_set:
+                    edge_set.add(key)
+                    edges_json.append({"from": current_city, "to": next_city, "label": label})
+                current_city = next_city
+                i += 4
+            # continue (ignores any trailing junk after valid pattern)
+
+        if edges_json:
+            logger.info("Deterministic graph parse success nodes=%d edges=%d (multi-path)", len(nodes_order), len(edges_json))
+            return {"nodes": nodes_order, "edges": edges_json}
+        # Fallback to single-edge regex if multi-hop parsing found nothing
+        single_edges = re.findall(r'\(([A-Za-z_]+)\s+--\s+(\d+(?:\.\d+)?)\s+-->\s+([A-Za-z_]+)\)', text)
+        if single_edges:
+            for a, w, b in single_edges:
+                add_node(a); add_node(b)
+                key = (a, b, w)
+                if key not in edge_set:
+                    edge_set.add(key)
+                    edges_json.append({"from": a, "to": b, "label": f"Weight: {w}"})
+            if edges_json:
+                logger.info("Deterministic graph parse success nodes=%d edges=%d (single-edge)", len(nodes_order), len(edges_json))
+                return {"nodes": nodes_order, "edges": edges_json}
     except Exception as e:  # noqa: BLE001
         logger.warning("Deterministic parse failed: %s", e)
 
