@@ -45,7 +45,7 @@ async def get_route(request: Request):
         return JSONResponse({"error": "Missing query"}, status_code=400)
 
     # 1. Convert user query to metta call
-    if re.match(r"^(hi|hello|hey|howdy|yo|sup|good (morning|evening|afternoon))\b", user_query, re.I):
+    if re.match(r"^(tell|hi|hello|hey|howdy|yo|sup|good (morning|evening|afternoon))\b", user_query, re.I):
         return {"answer": "👋 Hi! Ask me for routes like 'Fastest Jimma to Addis_Ababa' or add a fact with (flight-route CityA CityB (Duration d Cost c Distance x))"}
 
     metta_call, for_graph = user_query_to_metta_call(user_query, GEMINI_API_KEY)

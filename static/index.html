@@ -572,6 +572,125 @@
         .modal-body { padding: 24px 28px; overflow:auto; }
         .modal-footer { padding:16px 24px; border-top:1px solid var(--glass-border); display:flex; justify-content:flex-end; gap:12px; }
         @keyframes fadeIn { from {opacity:0; transform: translateY(10px);} to {opacity:1; transform:translateY(0);} }
+        /* Route legend styles */
+        .route-legend { 
+            display: flex; 
+            flex-direction: column; 
+            gap: 10px; 
+            background: var(--glass-bg);
+            border: 1px solid var(--glass-border);
+            border-radius: var(--radius-lg);
+            padding: 16px 18px; 
+            margin-top: 4px;
+            font-size: 0.75rem;
+            line-height: 1.35;
+        }
+        .route-legend h4 { 
+            margin: 0 0 4px; 
+            font-size: 0.65rem; 
+            letter-spacing: 0.12em; 
+            font-weight: 700; 
+            color: var(--primary); 
+            text-transform: uppercase; 
+            display:flex; 
+            align-items:center; 
+            gap:8px;
+        }
+        .route-item { 
+            display:flex; 
+            align-items:flex-start; 
+            gap:8px; 
+            background: rgba(255,255,255,0.03); 
+            padding:8px 10px; 
+            border-radius:10px; 
+            position:relative;
+            border: 1px solid rgba(255,255,255,0.05);
+            cursor: pointer;
+        }
+        .route-item:hover { background: rgba(255,255,255,0.07); }
+        .route-color-box { 
+            width:14px; 
+            height:14px; 
+            border-radius:4px; 
+            box-shadow:0 0 0 2px rgba(255,255,255,0.15) inset, 0 0 6px 0 rgba(0,0,0,0.4); 
+            flex-shrink:0; 
+            margin-top:2px; 
+            position:relative;
+        }
+        .route-item span.path { flex:1; word-break: break-word; }
+        .route-id-tag { 
+            font-size:0.55rem; 
+            font-weight:700; 
+            letter-spacing:0.1em; 
+            opacity:0.75; 
+            margin-right:4px; 
+            text-transform:uppercase; 
+            background: rgba(255,255,255,0.08); 
+            padding:2px 5px; 
+            border-radius:6px; 
+        }
+        .route-total { opacity:0.65; font-size:0.6rem; font-weight:600; margin-left:6px; }
+        .legend-empty { color: var(--text-muted); font-size:0.65rem; }
+        .legend-actions { display:flex; gap:8px; flex-wrap:wrap; margin-top:6px; }
+        .legend-actions button { 
+            background: var(--glass-bg); 
+            border:1px solid var(--glass-border); 
+            color: var(--text-secondary); 
+            font-size:0.6rem; 
+            letter-spacing:0.08em; 
+            padding:6px 10px; 
+            border-radius:8px; 
+            cursor:pointer; 
+            font-weight:600; 
+            transition: all .25s ease;
+        }
+        .legend-actions button:hover { background: var(--primary); color:#fff; }
+        .metric-toggle { display:flex; gap:6px; flex-wrap:wrap; margin-top:8px; }
+        .metric-toggle button { 
+            background: var(--glass-bg); 
+            border:1px solid var(--glass-border);
+            color: var(--text-secondary);
+            font-size:0.55rem;
+            padding:5px 8px;
+            border-radius:6px;
+            cursor:pointer;
+            font-weight:600;
+            letter-spacing:0.08em;
+            transition: all .25s ease;
+        }
+        .metric-toggle button.active { background: var(--primary); color:#fff; box-shadow:0 0 8px rgba(255,107,53,0.5); }
+        .metric-toggle button:hover { background: var(--primary); color:#fff; }
+        .export-actions { display:flex; gap:6px; flex-wrap:wrap; margin-top:10px; }
+        .export-actions button { 
+            background: var(--glass-bg); 
+            border:1px solid var(--glass-border); 
+            color: var(--text-secondary); 
+            font-size:0.55rem; 
+            padding:5px 8px; 
+            border-radius:6px; 
+            cursor:pointer; 
+            font-weight:600; 
+            letter-spacing:0.08em; 
+            transition: all .25s ease; 
+        }
+        .export-actions button:hover { background: var(--primary); color:#fff; }
+        .edge-tooltip { 
+            position: fixed; 
+            background: var(--bg-tertiary); 
+            padding:8px 10px; 
+            font-size:0.6rem; 
+            border:1px solid var(--glass-border); 
+            border-radius:8px; 
+            pointer-events:none; 
+            z-index:100; 
+            box-shadow: var(--shadow-lg); 
+            max-width:240px; 
+            line-height:1.3; 
+            color: var(--text-secondary); 
+            backdrop-filter: blur(10px);
+        }
+        .edge-tooltip strong { color: var(--text-primary); }
+        .edge-tooltip .metrics { display:flex; flex-direction:column; gap:2px; margin-top:4px; }
         
         .graph-panel h4 { 
             margin: 0 0 24px; 
@@ -734,6 +853,7 @@
             </div>
             <div class="modal-body">
                 <div id="graph" style="margin-bottom:24px;"></div>
+                <div id="routeLegend" class="route-legend" style="display:none;"></div>
                 <div class="metta-call" id="mettaCall" style="display:none;">
                     <button class="copy" id="copyCall">COPY</button>
                     <code id="mettaCallCode"></code>
@@ -782,6 +902,27 @@
         const chips = document.getElementById('chips');
         const vizModal = document.getElementById('vizModal');
         const closeViz = document.getElementById('closeViz');
+        const routeLegend = document.getElementById('routeLegend');
+    let metricMode = 'auto'; // 'auto' | 'duration' | 'cost' | 'distance' | 'all'
+
+        // Distinct route color palette
+        const routeColors = [
+            '#ff6b35', // vivid orange
+            '#2dd4bf', // teal
+            '#fbbf24', // amber
+            '#6366f1', // indigo
+            '#10b981', // emerald
+            '#f472b6', // pink
+            '#a855f7', // purple
+            '#06b6d4', // cyan
+            '#ef4444', // red
+            '#84cc16', // lime
+            '#fb7185', // rose
+            '#0ea5e9', // sky
+            '#d97706', // dark orange
+            '#14b8a6'  // deep teal
+        ];
+        let lockedRoute = null; // clicked route highlight lock
 
         function openViz() { vizModal.style.display='flex'; }
         function closeVizModal() { vizModal.style.display='none'; }
@@ -987,22 +1128,21 @@
         function updateEdges() {
             const svg = graphDiv.querySelector('svg');
             if (!svg) return;
-            const textMuted = getComputedStyle(document.documentElement).getPropertyValue('--text-muted');
             svg.querySelectorAll('path.edge').forEach(p => {
                 const from = p.getAttribute('data-from');
                 const to = p.getAttribute('data-to');
                 if (!(from in currentLayout) || !(to in currentLayout)) return;
                 const f = currentLayout[from];
                 const t = currentLayout[to];
-                const gap = Math.abs(f.x - t.x) / 120; // pseudo gap
-                let d;
-                if (Math.abs(f.y - t.y) < 10 && gap <= 1.2) {
-                    d = `M${f.x},${f.y} L${t.x},${t.y}`;
-                } else {
-                    const midX = (f.x + t.x) / 2;
-                    const midY = Math.min(f.y, t.y) - 60 - gap * 8;
-                    d = `M${f.x},${f.y} Q${midX},${midY} ${t.x},${t.y}`;
-                }
+                const order = Number(p.getAttribute('data-order')) || 0;
+                const gsize = Number(p.getAttribute('data-gsize')) || 1;
+                const centerOffset = (gsize - 1) / 2;
+                const offsetIndex = order - centerOffset;
+                const baseMidY = Math.min(f.y, t.y) - 60;
+                const spread = 18;
+                const midX = (f.x + t.x) / 2;
+                const midY = baseMidY - offsetIndex * spread;
+                const d = `M${f.x},${f.y} Q${midX},${midY} ${t.x},${t.y}`;
                 p.setAttribute('d', d);
             });
             svg.querySelectorAll('text.edge-label').forEach(lbl => {
@@ -1011,15 +1151,20 @@
                 if (!(from in currentLayout) || !(to in currentLayout)) return;
                 const f = currentLayout[from];
                 const t = currentLayout[to];
-                const labelX = (f.x + t.x) / 2;
-                const labelY = (f.y + t.y) / 2 - 25;
-                lbl.setAttribute('x', labelX);
-                lbl.setAttribute('y', labelY);
+                const order = Number(lbl.getAttribute('data-order')) || 0;
+                const gsize = Number(lbl.getAttribute('data-gsize')) || 1;
+                const centerOffset = (gsize - 1) / 2;
+                const offsetIndex = order - centerOffset;
+                const midX = (f.x + t.x) / 2;
+                const midY = (Math.min(f.y, t.y) - 60 - offsetIndex * 18);
+                lbl.setAttribute('x', midX);
+                lbl.setAttribute('y', midY - 6);
             });
         }
         function renderGraph(graph) {
             if (!graph || !Array.isArray(graph.nodes) || !Array.isArray(graph.edges)) {
                 graphDiv.innerHTML = '<p style="color:var(--text-muted);">No graph data.</p>';
+                routeLegend.style.display = 'none';
                 return;
             }
             // Normalize node list if backend returned primitives or objects
@@ -1041,8 +1186,11 @@
                 const from = e.from || (e.source || e[0]);
                 const to = e.to || (e.target || e[1]);
                 const label = e.label || e.weight || e.value || 'route';
+                const route = (typeof e.route !== 'undefined') ? Number(e.route) : (typeof e.route_index !== 'undefined' ? Number(e.route_index) : 0);
                 if (!from || !to) return null;
-                return { from: String(from), to: String(to), label: String(label) };
+                // Parse metrics from label (Duration d Cost c Distance x)
+                const metrics = parseMetrics(String(label));
+                return { from: String(from), to: String(to), label: String(label), route, metrics };
             }).filter(Boolean);
             // Add any missing nodes referenced only in edges
             edges.forEach(ed => {
@@ -1051,6 +1199,7 @@
             });
             if (!nodes.length) {
                 graphDiv.innerHTML = '<p style="color:var(--text-muted);">No nodes to display.</p>';
+                routeLegend.style.display = 'none';
                 return;
             }
             initialLayout(nodes, edges);
@@ -1066,16 +1215,38 @@
                     <path d="M0,0 L0,6 L9,3 z" fill="${getComputedStyle(document.documentElement).getPropertyValue('--text-muted')}" />
                 </marker>
             </defs>`;
-            // Edges first (so they render below nodes) using temporary placeholders; updated later
-            edges.forEach(edge => {
+            // Group edges by unordered node pair for curvature separation
+            const pairGroups = new Map();
+            edges.forEach((ed, idx) => {
+                const key = ed.from < ed.to ? `${ed.from}|${ed.to}` : `${ed.to}|${ed.from}`;
+                if (!pairGroups.has(key)) pairGroups.set(key, []);
+                pairGroups.get(key).push(idx);
+            });
+            pairGroups.forEach(arr => arr.sort((a,b) => {
+                const ra = edges[a].route, rb = edges[b].route;
+                if (ra === rb) return a - b;
+                return ra - rb;
+            }));
+            // Render colored edges with curvature offsets
+            edges.forEach((edge, idx) => {
                 const f = currentLayout[edge.from];
                 const t = currentLayout[edge.to];
                 if (!f || !t) return;
+                const key = edge.from < edge.to ? `${edge.from}|${edge.to}` : `${edge.to}|${edge.from}`;
+                const group = pairGroups.get(key) || [idx];
+                const order = group.indexOf(idx);
+                const groupSize = group.length;
+                const centerOffset = (groupSize - 1) / 2;
+                const offsetIndex = order - centerOffset;
+                const baseMidY = Math.min(f.y, t.y) - 60;
+                const spread = 18;
                 const midX = (f.x + t.x) / 2;
-                const midY = Math.min(f.y, t.y) - 60;
+                const midY = baseMidY - offsetIndex * spread;
                 const d = `M${f.x},${f.y} Q${midX},${midY} ${t.x},${t.y}`;
-                html += `<path class="edge" data-from="${edge.from}" data-to="${edge.to}" d="${d}" stroke="${getComputedStyle(document.documentElement).getPropertyValue('--text-muted')}" stroke-width="2" fill="none" marker-end="url(#arrow)"/>`;
-                html += `<text class="edge-label" data-from="${edge.from}" data-to="${edge.to}" text-anchor="middle" fill="${getComputedStyle(document.documentElement).getPropertyValue('--text-muted')}" font-size="0.65rem" font-weight="500"></text>`;
+                const stroke = routeColors[edge.route % routeColors.length];
+                const strokeWidth = edge.route === 0 ? 3 : 2.5;
+                html += `<path class="edge" data-from="${edge.from}" data-to="${edge.to}" data-route="${edge.route}" data-order="${order}" data-gsize="${groupSize}" d="${d}" stroke="${stroke}" stroke-opacity="0.9" stroke-width="${strokeWidth}" fill="none" marker-end="url(#arrow)" style="mix-blend-mode:screen;" data-duration="${edge.metrics.duration ?? ''}" data-cost="${edge.metrics.cost ?? ''}" data-distance="${edge.metrics.distance ?? ''}" data-raw="${encodeHTML(edge.label)}"/>`;
+                html += `<text class="edge-label" data-from="${edge.from}" data-to="${edge.to}" data-route="${edge.route}" data-order="${order}" data-gsize="${groupSize}" text-anchor="middle" fill="${stroke}" fill-opacity="0.85" font-size="0.65rem" font-weight="600"></text>`;
             });
             // Nodes
             nodes.forEach(node => {
@@ -1093,11 +1264,429 @@
             svgEl.querySelectorAll('text.edge-label').forEach(lbl => {
                 const from = lbl.getAttribute('data-from');
                 const to = lbl.getAttribute('data-to');
-                const ed = edges.find(e => e.from === from && e.to === to || e.from === to && e.to === from);
-                if (ed) lbl.textContent = ed.label;
+                const route = Number(lbl.getAttribute('data-route'));
+                const ed = edges.find(e => ((e.from === from && e.to === to) || (e.from === to && e.to === from)) && e.route === route);
+                if (ed) lbl.textContent = formatEdgeLabel(ed.metrics, ed.label);
             });
             updateEdges();
             attachDrag(svgEl);
+            buildRouteLegend(edges);
+            attachEdgeTooltips(svgEl);
+            addMetricControls();
+            addExportControls();
+        }
+        function buildRouteLegend(edges) {
+            if (!edges.length) { routeLegend.style.display='none'; return; }
+            const byRoute = new Map();
+            edges.forEach(ed => {
+                if (!byRoute.has(ed.route)) byRoute.set(ed.route, []);
+                byRoute.get(ed.route).push(ed);
+            });
+            const routes = [...byRoute.keys()].sort((a,b)=>a-b);
+            let html = '<h4>Routes</h4>';
+            if (!routes.length) { html += '<div class="legend-empty">No routes parsed.</div>'; }
+            routes.forEach(rIdx => {
+                const rEdges = byRoute.get(rIdx);
+                // Attempt simple reconstruction of path sequence
+                const fromSet = new Set(rEdges.map(e => e.from));
+                const toSet = new Set(rEdges.map(e => e.to));
+                let start = [...fromSet].find(f => !toSet.has(f)) || rEdges[0].from;
+                const adj = new Map();
+                rEdges.forEach(e => { if (!adj.has(e.from)) adj.set(e.from, []); adj.get(e.from).push(e.to); });
+                const seq = [start];
+                let cur = start;
+                const maxHops = rEdges.length + 5;
+                for (let i=0;i<maxHops;i++) {
+                    const outs = (adj.get(cur) || []).sort();
+                    if (!outs.length) break;
+                    const nxt = outs.shift();
+                    seq.push(nxt);
+                    cur = nxt;
+                    if (seq.length > rEdges.length + 5) break;
+                }
+                let total = 0;
+                for (let i=0;i<seq.length-1;i++) {
+                    const a = seq[i], b = seq[i+1];
+                    const edge = rEdges.find(e => e.from === a && e.to === b);
+                    if (edge) { const m = edge.label.match(/(\d+(?:\.\d+)?)/); if (m) total += parseFloat(m[1]); }
+                }
+                const color = routeColors[rIdx % routeColors.length];
+                const totalText = total ? `<span class=\"route-total\">Σ ${total}</span>` : '';
+                html += `<div class=\"route-item\" data-route=\"${rIdx}\"><div class=\"route-color-box\" style=\"background:${color};\"></div><span class=\"path\"><span class=\"route-id-tag\">R${rIdx}</span>${seq.join(' → ')}${totalText}</span></div>`;
+            });
+            html += '<div class="legend-actions"><button type="button" id="highlightAll">HIGHLIGHT ALL</button><button type="button" id="dimAll">DIM ALL</button><button type="button" id="resetViz">RESET</button></div>';
+            routeLegend.innerHTML = html;
+            routeLegend.style.display = 'flex';
+            routeLegend.querySelectorAll('.route-item').forEach(item => {
+                item.addEventListener('mouseenter', () => highlightRoute(Number(item.dataset.route)) );
+                item.addEventListener('mouseleave', () => clearHighlight());
+                item.addEventListener('click', () => lockRoute(Number(item.dataset.route)) );
+            });
+            const hlAll = routeLegend.querySelector('#highlightAll');
+            const dmAll = routeLegend.querySelector('#dimAll');
+            const rsBtn = routeLegend.querySelector('#resetViz');
+            if (hlAll) hlAll.onclick = () => highlightAll();
+            if (dmAll) dmAll.onclick = () => dimAll();
+            if (rsBtn) rsBtn.onclick = () => resetViz();
+        }
+        function highlightRoute(rIdx) {
+            if (lockedRoute !== null) return; // don't override locked state
+            const svg = graphDiv.querySelector('svg');
+            if (!svg) return;
+            svg.querySelectorAll('path.edge').forEach(p => {
+                const pr = Number(p.getAttribute('data-route'));
+                if (pr === rIdx) {
+                    p.style.strokeOpacity = '1';
+                    p.style.filter = 'drop-shadow(0 0 6px rgba(255,255,255,0.4))';
+                } else {
+                    p.style.strokeOpacity = '0.15';
+                    p.style.filter = '';
+                }
+            });
+            svg.querySelectorAll('text.edge-label').forEach(lbl => {
+                const pr = Number(lbl.getAttribute('data-route'));
+                lbl.style.opacity = (pr === rIdx) ? '1' : '0.2';
+            });
+        }
+        function clearHighlight() {
+            if (lockedRoute !== null) return;
+            const svg = graphDiv.querySelector('svg');
+            if (!svg) return;
+            svg.querySelectorAll('path.edge').forEach(p => { p.style.strokeOpacity='0.9'; p.style.filter=''; });
+            svg.querySelectorAll('text.edge-label').forEach(lbl => { lbl.style.opacity='0.85'; });
+        }
+        function lockRoute(rIdx) {
+            if (lockedRoute === rIdx) { lockedRoute = null; clearHighlight(); return; }
+            lockedRoute = rIdx;
+            highlightRoute(rIdx);
+        }
+        function highlightAll() { lockedRoute = null; clearHighlight(); }
+        function dimAll() {
+            lockedRoute = null;
+            const svg = graphDiv.querySelector('svg');
+            if (!svg) return;
+            svg.querySelectorAll('path.edge').forEach(p => { p.style.strokeOpacity='0.15'; p.style.filter=''; });
+            svg.querySelectorAll('text.edge-label').forEach(lbl => { lbl.style.opacity='0.2'; });
+        }
+        function resetViz() { lockedRoute = null; clearHighlight(); }
+        function parseMetrics(label) {
+            const metricObj = { duration: null, cost: null, distance: null, raw: label };
+            // Simple regex to capture numbers after keywords (case-insensitive)
+            const d = label.match(/Duration\s+(\d+(?:\.\d+)?)/i);
+            const c = label.match(/Cost\s+(\d+(?:\.\d+)?)/i);
+            const dist = label.match(/Distance\s+(\d+(?:\.\d+)?)/i);
+            if (d) metricObj.duration = parseFloat(d[1]);
+            if (c) metricObj.cost = parseFloat(c[1]);
+            if (dist) metricObj.distance = parseFloat(dist[1]);
+            return metricObj;
+        }
+        function formatEdgeLabel(metrics, raw) {
+            if (!metrics) return raw;
+            if (metricMode === 'all') {
+                const parts = [];
+                if (metrics.duration != null) parts.push(`D:${metrics.duration}`);
+                if (metrics.cost != null) parts.push(`C:${metrics.cost}`);
+                if (metrics.distance != null) parts.push(`Dist:${metrics.distance}`);
+                return parts.join(' ' ) || raw;
+            }
+            if (metricMode === 'duration' && metrics.duration != null) return `D:${metrics.duration}`;
+            if (metricMode === 'cost' && metrics.cost != null) return `C:${metrics.cost}`;
+            if (metricMode === 'distance' && metrics.distance != null) return `Dist:${metrics.distance}`;
+            if (metricMode === 'auto') {
+                if (metrics.duration != null) return `D:${metrics.duration}`;
+                if (metrics.cost != null) return `C:${metrics.cost}`;
+                if (metrics.distance != null) return `Dist:${metrics.distance}`;
+            }
+            return raw;
+        }
+        function updateMetricLabels() {
+            const svg = graphDiv.querySelector('svg');
+            if (!svg) return;
+            svg.querySelectorAll('text.edge-label').forEach(lbl => {
+                const from = lbl.getAttribute('data-from');
+                const to = lbl.getAttribute('data-to');
+                const route = Number(lbl.getAttribute('data-route'));
+                const pathEl = svg.querySelector(`path.edge[data-from="${from}"][data-to="${to}"][data-route="${route}"]`) || svg.querySelector(`path.edge[data-from="${to}"][data-to="${from}"][data-route="${route}"]`);
+                if (!pathEl) return;
+                const metrics = {
+                    duration: pathEl.getAttribute('data-duration') ? Number(pathEl.getAttribute('data-duration')) : null,
+                    cost: pathEl.getAttribute('data-cost') ? Number(pathEl.getAttribute('data-cost')) : null,
+                    distance: pathEl.getAttribute('data-distance') ? Number(pathEl.getAttribute('data-distance')) : null
+                };
+                const raw = pathEl.getAttribute('data-raw') || '';
+                lbl.textContent = formatEdgeLabel(metrics, raw);
+            });
+        }
+        function addMetricControls() {
+            if (document.getElementById('metricToggle')) return; // already added
+            const wrap = document.createElement('div');
+            wrap.className = 'metric-toggle';
+            wrap.id = 'metricToggle';
+            const modes = [
+                {id:'auto', label:'AUTO'},
+                {id:'duration', label:'DUR'},
+                {id:'cost', label:'COST'},
+                {id:'distance', label:'DIST'},
+                {id:'all', label:'ALL'}
+            ];
+            modes.forEach(m => {
+                const btn = document.createElement('button');
+                btn.textContent = m.label;
+                btn.dataset.mode = m.id;
+                if (m.id === metricMode) btn.classList.add('active');
+                btn.addEventListener('click', () => {
+                    metricMode = m.id;
+                    wrap.querySelectorAll('button').forEach(b => b.classList.remove('active'));
+                    btn.classList.add('active');
+                    updateMetricLabels();
+                });
+                wrap.appendChild(btn);
+            });
+            routeLegend.appendChild(wrap);
+        }
+        function addExportControls() {
+            if (document.getElementById('exportActions')) return;
+            const wrap = document.createElement('div');
+            wrap.className = 'export-actions';
+            wrap.id = 'exportActions';
+            const btnSVG = document.createElement('button');
+            btnSVG.textContent = 'EXPORT SVG';
+            btnSVG.addEventListener('click', exportSVG);
+            const btnPNG = document.createElement('button');
+            btnPNG.textContent = 'EXPORT PNG';
+            btnPNG.addEventListener('click', exportPNG);
+            const btnIso = document.createElement('button');
+            btnIso.textContent = 'ISOLATE LOCKED';
+            btnIso.addEventListener('click', isolateLockedRoute);
+            const btnShowAll = document.createElement('button');
+            btnShowAll.textContent = 'SHOW ALL';
+            btnShowAll.addEventListener('click', () => { lockedRoute = null; clearIsolation(); });
+            const btnAnim = document.createElement('button');
+            btnAnim.textContent = 'ANIMATE LOCKED';
+            btnAnim.addEventListener('click', () => { if (lockedRoute != null) animateRoute(lockedRoute); });
+            const btnStopAnim = document.createElement('button');
+            btnStopAnim.textContent = 'STOP ANIM';
+            btnStopAnim.addEventListener('click', stopRouteAnimation);
+            wrap.appendChild(btnSVG); wrap.appendChild(btnPNG); wrap.appendChild(btnIso); wrap.appendChild(btnShowAll); wrap.appendChild(btnAnim); wrap.appendChild(btnStopAnim);
+            routeLegend.appendChild(wrap);
+        }
+        function exportSVG() {
+            const svg = graphDiv.querySelector('svg');
+            if (!svg) return;
+            const serializer = new XMLSerializer();
+            let source = serializer.serializeToString(svg);
+            if(!source.match(/^<svg[^>]+xmlns="http\:\/\/www.w3.org\/2000\/svg"/)) {
+                source = source.replace('<svg', '<svg xmlns="http://www.w3.org/2000/svg"');
+            }
+            const blob = new Blob([source], {type:'image/svg+xml;charset=utf-8'});
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'routes.svg';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        }
+        function exportPNG() {
+            const svg = graphDiv.querySelector('svg');
+            if (!svg) return;
+            const serializer = new XMLSerializer();
+            let source = serializer.serializeToString(svg);
+            if(!source.match(/^<svg[^>]+xmlns="http\:\/\/www.w3.org\/2000\/svg"/)) {
+                source = source.replace('<svg', '<svg xmlns="http://www.w3.org/2000/svg"');
+            }
+            const img = new Image();
+            const svgBlob = new Blob([source], {type:'image/svg+xml;charset=utf-8'});
+            const url = URL.createObjectURL(svgBlob);
+            img.onload = function() {
+                const canvas = document.createElement('canvas');
+                canvas.width = svg.viewBox.baseVal && svg.viewBox.baseVal.width ? svg.viewBox.baseVal.width : svg.width.baseVal.value;
+                canvas.height = svg.viewBox.baseVal && svg.viewBox.baseVal.height ? svg.viewBox.baseVal.height : svg.height.baseVal.value;
+                const ctx = canvas.getContext('2d');
+                ctx.fillStyle = '#0a0e27';
+                ctx.fillRect(0,0,canvas.width, canvas.height);
+                ctx.drawImage(img,0,0);
+                URL.revokeObjectURL(url);
+                canvas.toBlob(b => {
+                    const a = document.createElement('a');
+                    a.href = URL.createObjectURL(b);
+                    a.download = 'routes.png';
+                    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+                }, 'image/png');
+            };
+            img.src = url;
+        }
+        function isolateLockedRoute() {
+            if (lockedRoute == null) return; // need a locked route first (click legend item)
+            const svg = graphDiv.querySelector('svg');
+            if (!svg) return;
+            svg.querySelectorAll('path.edge').forEach(p => {
+                const pr = Number(p.getAttribute('data-route'));
+                p.style.display = (pr === lockedRoute) ? '' : 'none';
+            });
+            svg.querySelectorAll('text.edge-label').forEach(lbl => {
+                const pr = Number(lbl.getAttribute('data-route'));
+                lbl.style.display = (pr === lockedRoute) ? '' : 'none';
+            });
+        }
+        function clearIsolation() {
+            const svg = graphDiv.querySelector('svg');
+            if (!svg) return;
+            svg.querySelectorAll('path.edge, text.edge-label').forEach(el => { el.style.display=''; });
+            clearHighlight();
+        }
+        // ---- Route Animation ----
+        let routeAnimState = { active:false, cancel:false, tracer:null, currentEdgeIndex:0 };
+        function animateRoute(routeIdx) {
+            stopRouteAnimation();
+            const svg = graphDiv.querySelector('svg');
+            if (!svg) return;
+            // Collect edges for route in order (attempt sequence reconstruction similar to legend)
+            const edges = [...svg.querySelectorAll(`path.edge[data-route="${routeIdx}"]`)];
+            if (!edges.length) return;
+            // Build graph
+            const uniqueNodes = new Set();
+            const simpleEdges = edges.map(p => ({from:p.getAttribute('data-from'), to:p.getAttribute('data-to'), el:p}));
+            simpleEdges.forEach(e => { uniqueNodes.add(e.from); uniqueNodes.add(e.to); });
+            const fromSet = new Set(simpleEdges.map(e=>e.from));
+            const toSet = new Set(simpleEdges.map(e=>e.to));
+            let start = [...fromSet].find(f=>!toSet.has(f)) || simpleEdges[0].from;
+            const adj = new Map();
+            simpleEdges.forEach(e => { if(!adj.has(e.from)) adj.set(e.from, []); adj.get(e.from).push(e); });
+            // Order edges greedily
+            const ordered = [];
+            let current = start;
+            const safety = simpleEdges.length + 5;
+            for (let i=0;i<safety;i++) {
+                const list = (adj.get(current)||[]);
+                if (!list.length) break;
+                // pick first unused edge
+                let idx = list.findIndex(ed => !ed._used);
+                if (idx === -1) break;
+                const edge = list[idx];
+                edge._used = true;
+                ordered.push(edge);
+                current = edge.to;
+                if (ordered.length === simpleEdges.length) break;
+            }
+            if (!ordered.length) return;
+            // Prepare tracer circle
+            let tracer = svg.querySelector('#routeTracer');
+            if (!tracer) {
+                tracer = document.createElementNS('http://www.w3.org/2000/svg','circle');
+                tracer.setAttribute('id','routeTracer');
+                tracer.setAttribute('r','8');
+                tracer.setAttribute('fill', routeColors[routeIdx % routeColors.length]);
+                tracer.setAttribute('stroke','white');
+                tracer.setAttribute('stroke-width','2');
+                svg.appendChild(tracer);
+            }
+            tracer.style.display='';
+            routeAnimState = { active:true, cancel:false, tracer, currentEdgeIndex:0 };
+            // Reset dash styles
+            ordered.forEach(e => {
+                const path = e.el;
+                path.style.transition = 'none';
+                const len = path.getTotalLength();
+                path.setAttribute('data-len', len);
+                path.style.strokeDasharray = len;
+                path.style.strokeDashoffset = len;
+                path.style.opacity = '0.25';
+            });
+            function animateEdge(i) {
+                if (routeAnimState.cancel) return;
+                if (i >= ordered.length) { finishAnimation(); return; }
+                routeAnimState.currentEdgeIndex = i;
+                const edge = ordered[i];
+                const path = edge.el;
+                const len = Number(path.getAttribute('data-len')) || path.getTotalLength();
+                path.style.opacity = '1';
+                // Animate dash
+                path.style.transition = 'stroke-dashoffset 0.9s linear, opacity 0.3s ease';
+                requestAnimationFrame(()=>{ path.style.strokeDashoffset = '0'; });
+                // Move tracer along path
+                const startTs = performance.now();
+                const duration = 900; // ms
+                function step(ts) {
+                    if (routeAnimState.cancel) return;
+                    const t = Math.min(1, (ts - startTs)/duration);
+                    const point = path.getPointAtLength(len * t);
+                    routeAnimState.tracer.setAttribute('cx', point.x);
+                    routeAnimState.tracer.setAttribute('cy', point.y);
+                    if (t < 1) {
+                        requestAnimationFrame(step);
+                    } else {
+                        // slight pause then next
+                        setTimeout(()=>animateEdge(i+1), 120);
+                    }
+                }
+                requestAnimationFrame(step);
+            }
+            function finishAnimation() {
+                if (routeAnimState.tracer) {
+                    routeAnimState.tracer.style.display='none';
+                }
+                ordered.forEach(e => { e.el.style.opacity='1'; e.el.style.strokeDasharray=''; e.el.style.strokeDashoffset=''; });
+                routeAnimState.active=false;
+            }
+            animateEdge(0);
+        }
+        function stopRouteAnimation() {
+            if (!routeAnimState.active) return;
+            routeAnimState.cancel = true;
+            const svg = graphDiv.querySelector('svg');
+            if (svg) {
+                svg.querySelectorAll('path.edge').forEach(p => {
+                    p.style.strokeDasharray='';
+                    p.style.strokeDashoffset='';
+                    p.style.opacity='0.9';
+                });
+                const tracer = svg.querySelector('#routeTracer');
+                if (tracer) tracer.style.display='none';
+            }
+            routeAnimState.active=false;
+        }
+        function attachEdgeTooltips(svg) {
+            let tooltip = document.getElementById('edgeTooltip');
+            if (!tooltip) {
+                tooltip = document.createElement('div');
+                tooltip.id = 'edgeTooltip';
+                tooltip.className = 'edge-tooltip';
+                tooltip.style.display = 'none';
+                document.body.appendChild(tooltip);
+            }
+            const show = (e, p) => {
+                const from = p.getAttribute('data-from');
+                const to = p.getAttribute('data-to');
+                const route = p.getAttribute('data-route');
+                const dur = p.getAttribute('data-duration');
+                const cost = p.getAttribute('data-cost');
+                const dist = p.getAttribute('data-distance');
+                const raw = decodeHTML(p.getAttribute('data-raw') || '');
+                tooltip.innerHTML = `<strong>${from} → ${to}</strong><br/>Route: R${route}<div class="metrics">${dur?`<span>Duration: ${dur}</span>`:''}${cost?`<span>Cost: ${cost}</span>`:''}${dist?`<span>Distance: ${dist}</span>`:''}</div><div style="margin-top:4px; opacity:.6;">${raw}</div>`;
+                tooltip.style.display = 'block';
+                position(e);
+            };
+            const hide = () => { tooltip.style.display='none'; };
+            const position = (e) => {
+                const pad = 12;
+                tooltip.style.left = (e.clientX + pad) + 'px';
+                tooltip.style.top = (e.clientY + pad) + 'px';
+            };
+            svg.querySelectorAll('path.edge').forEach(p => {
+                p.addEventListener('mousemove', ev => position(ev));
+                p.addEventListener('mouseenter', ev => show(ev, p));
+                p.addEventListener('mouseleave', hide);
+            });
+        }
+        function encodeHTML(str) {
+            return str.replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]||c));
+        }
+        function decodeHTML(str) {
+            const txt = document.createElement('textarea');
+            txt.innerHTML = str;
+            return txt.value;
         }
     </script>
 </body></html>
